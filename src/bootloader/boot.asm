@@ -47,56 +47,150 @@ ebr_system_id:  db 'FAT12   ' ;Should be 8 Bytes
 
 
 start:
-    jmp main
 
-;  Prints a string to the string
-;  Input:
-;   ds:si - pointer to the string
-
-puts:
-    ; save register before will will modify them
-    push si
-    push ax
-
-.loop:
-    ; load the byte from ds:si
-    lodsb     ; load new char in al and increment si
-    or al,al  ; check if al is 0
-    jz .done  ; if al is 0, we are done
-    
-    mov ah,0x0E ; tty mode
-    mov bh,0x00 
-    int 0x10    ; call BIOS tty function
-    jmp .loop
-
-.done:
-    ; restore registers
-    pop ax
-    pop si
-    ret   ; transfer control back to the caller
-
-main:
-
-    ; setup data segment
     mov ax,0
     mov ds, ax
     mov es, ax
     ; setup stack
     mov ss,ax
     mov sp,0x7C00
+    ; some BIOS functions will start us at 07C0:0000 than 0000:7C00
+    push es
+    push word .after
+    retf
+.after:
 
+    mov [ebr_drive_number], dl
+    ; show loading message
+    mov si, msg_loading
+    call puts
 
-    ; read something from disk
-    mov ax,1
-    mov cl,1     
-    mov bx, 0x7E00
+    ; read drive parameters
+    push es
+    mov ah, 08h
+    int 13h
+    jc floppy_error
+    pop es
+
+    and cl, 0x3F ; clear the high 2 bits of cl
+    xor ch,ch
+    mov [bdb_sector_per_track], cx
+
+    inc dh
+    mov [bdb_heads], dh
+
+    mov ax, [bdb_sector_per_fat]    ; read the first sector of the FAT
+    mov bl, [bdb_fat_count]
+    xor bh, bh
+    mul bx
+    add ax, [bdb_reserved_sectors]
+    push ax
+
+    mov ax, [bdb_sector_per_fat]
+    shl ax,5
+    xor dx, dx
+    div word [bdb_bytes_per_sector]
+
+    test dx,dx
+    jz .root_dir_after
+    inc ax
+
+.root_dir_after:
+
+    mov cl,al
+    pop ax
+    mov dl, [ebr_drive_number]
+    mov bx, buffer
+    call disk_read
+
+    ;search for kernal . bin file 
+    xor bx, bx
+    mov di, buffer
+
+.search_kernal:
+
+    mov si, file_kernal_bin  ; storing file name in si register 
+
+    mov cx,11   ; stroring length of kernal . bin file name in cx register
+    push di
+    repe cmpsb ; compare string bytes
+    pop di
+    je .found_kernal
+
+    add di,32
+    inc bx
+    cmp bx, [bdb_dir_entries_count]
+    jl .search_kernal
+
+    jmp kernal_not_found_error
+
+.found_kernal:
+
+    ; di should have same value as the start of the file entry
+
+    mov ax, [di+26] ; cluster number
+    mov [kernal_cluster], ax
+    ; read FAT from disk to the memory
+    mov ax, [bdb_reserved_sectors]
+    mov bx, buffer
+    mov cl, [bdb_sector_per_fat]
+    mov dl, [ebr_drive_number]
     call disk_read
 
 
+    ; read kernal and process FAT chain since we are in 16 bit mode we cant write memory above 1 MB
+    mov bx, KERNAL_LOAD_SEGMENT
+    mov es, bx
+    mov bx, KERNAL_LOAD_OFFSET
 
-    ; print message
-    mov si, msg_hello
-    call puts
+.loop_kernal_loop:
+    ; read next cluster
+    mov ax, [kernal_cluster]
+    ; not nice hardcoding 512 bytes per sector
+    add ax, 31  ; first cluster = (kernal_cluster - 2 )* sectors per cluster + data start
+
+    mov cl,1
+    mov dl, [ebr_drive_number]
+    call disk_read
+
+    add bx, [bdb_bytes_per_sector] ; overflow is kernal file is more than 512
+
+    ; compute next cluster
+    mov ax, [kernal_cluster]
+    mov cx,3
+    mul cx
+    mov cx,2
+    div cx
+
+    mov si, buffer
+    add si,ax
+    mov ax, [ds:si]
+
+    or dx,dx
+    jz .even
+ .odd:
+    shr ax,4
+    jmp .next_cluster_after
+
+ .even:
+    add ax, 0x0FFF
+
+ .next_cluster_after:
+    cmp ax, 0xFF8
+    jae .read_finish
+
+    mov [kernal_cluster], ax
+    jmp .loop_kernal_loop
+
+.read_finish:
+    ; jump to kernal
+    mov dl, [ebr_drive_number]
+    mov ax, KERNAL_LOAD_SEGMENT
+    mov ds,ax
+    mov es,ax
+    jmp KERNAL_LOAD_SEGMENT:KERNAL_LOAD_OFFSET
+
+    jmp wait_key_and_reboot
     cli ; disable interrupts as if mouse will also cause interupts
     hlt
 
@@ -107,6 +201,11 @@ main:
 
 floppy_error:
     mov si, msg_error_failed_to_read
+    call puts
+    jmp wait_key_and_reboot
+
+kernal_not_found_error:
+    mov si, msg_error_kernal_not_found
     call puts
     jmp wait_key_and_reboot
 
@@ -126,6 +225,28 @@ wait_key_and_reboot:
 
 
 
+puts:
+    ; save registers we will modify
+    push si
+    push ax
+    push bx
+
+.loop:
+    lodsb               ; loads next character in al
+    or al, al           ; verify if next character is null?
+    jz .done
+
+    mov ah, 0x0E        ; call bios interrupt
+    mov bh, 0           ; set page number to 0
+    int 0x10
+
+    jmp .loop
+
+.done:
+    pop bx
+    pop ax
+    pop si    
+    ret
 
 
 
@@ -238,8 +359,16 @@ disk_reset:
 
 
 
-msg_hello: db "Hello, World!",ENDL,0
+msg_loading: db "Loading...",ENDL,0
 msg_error_failed_to_read: db "Failed to read disk",ENDL,0
+msg_error_kernal_not_found: db "KERNAL.BIN file not found",ENDL,0
+file_kernal_bin: db "KERNAL  BIN"
+kernal_cluster: dw 0
+
+KERNAL_LOAD_SEGMENT: equ 0x2000
+KERNAL_LOAD_OFFSET: equ 0
 
 times 510-($-$$) db 0
 dw 0xAA55
+
+buffer:
