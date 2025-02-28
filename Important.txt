@@ -2,5 +2,5 @@
 Output
 ./build/tools/fat build/main_floppy.img "TEST    TXT"
 Name: NBOS       
-Name: KERNAL  BIN 
+Name: KERNEL  BIN 
 Name: TEST    TXT 

@@ -103,33 +103,33 @@ start:
     mov bx, buffer
     call disk_read
 
-    ;search for kernal . bin file 
+    ;search for kernel . bin file 
     xor bx, bx
     mov di, buffer
 
-.search_kernal:
+.search_kernel:
 
-    mov si, file_kernal_bin  ; storing file name in si register 
+    mov si, file_kernel_bin  ; storing file name in si register 
 
-    mov cx,11   ; stroring length of kernal . bin file name in cx register
+    mov cx,11   ; stroring length of kernel . bin file name in cx register
     push di
     repe cmpsb ; compare string bytes
     pop di
-    je .found_kernal
+    je .found_kernel
 
     add di,32
     inc bx
     cmp bx, [bdb_dir_entries_count]
-    jl .search_kernal
+    jl .search_kernel
 
-    jmp kernal_not_found_error
+    jmp kernel_not_found_error
 
-.found_kernal:
+.found_kernel:
 
     ; di should have same value as the start of the file entry
 
     mov ax, [di+26] ; cluster number
-    mov [kernal_cluster], ax
+    mov [kernel_cluster], ax
     ; read FAT from disk to the memory
     mov ax, [bdb_reserved_sectors]
     mov bx, buffer
@@ -138,25 +138,25 @@ start:
     call disk_read
 
 
-    ; read kernal and process FAT chain since we are in 16 bit mode we cant write memory above 1 MB
-    mov bx, KERNAL_LOAD_SEGMENT
+    ; read kernel and process FAT chain since we are in 16 bit mode we cant write memory above 1 MB
+    mov bx, KERNEL_LOAD_SEGMENT
     mov es, bx
-    mov bx, KERNAL_LOAD_OFFSET
+    mov bx, KERNEL_LOAD_OFFSET
 
-.loop_kernal_loop:
+.loop_kernel_loop:
     ; read next cluster
-    mov ax, [kernal_cluster]
+    mov ax, [kernel_cluster]
     ; not nice hardcoding 512 bytes per sector
-    add ax, 31  ; first cluster = (kernal_cluster - 2 )* sectors per cluster + data start
+    add ax, 31  ; first cluster = (kernel_cluster - 2 )* sectors per cluster + data start
 
     mov cl,1
     mov dl, [ebr_drive_number]
     call disk_read
 
-    add bx, [bdb_bytes_per_sector] ; overflow is kernal file is more than 512
+    add bx, [bdb_bytes_per_sector] ; overflow is kernel file is more than 512
 
     ; compute next cluster
-    mov ax, [kernal_cluster]
+    mov ax, [kernel_cluster]
     mov cx,3
     mul cx
     mov cx,2
@@ -179,16 +179,16 @@ start:
     cmp ax, 0xFF8
     jae .read_finish
 
-    mov [kernal_cluster], ax
-    jmp .loop_kernal_loop
+    mov [kernel_cluster], ax
+    jmp .loop_kernel_loop
 
 .read_finish:
-    ; jump to kernal
+    ; jump to kernel
     mov dl, [ebr_drive_number]
-    mov ax, KERNAL_LOAD_SEGMENT
+    mov ax, KERNEL_LOAD_SEGMENT
     mov ds,ax
     mov es,ax
-    jmp KERNAL_LOAD_SEGMENT:KERNAL_LOAD_OFFSET
+    jmp KERNEL_LOAD_SEGMENT:KERNEL_LOAD_OFFSET
 
     jmp wait_key_and_reboot
     cli ; disable interrupts as if mouse will also cause interupts
@@ -204,8 +204,8 @@ floppy_error:
     call puts
     jmp wait_key_and_reboot
 
-kernal_not_found_error:
-    mov si, msg_error_kernal_not_found
+kernel_not_found_error:
+    mov si, msg_error_kernel_not_found
     call puts
     jmp wait_key_and_reboot
 
@@ -361,14 +361,14 @@ disk_reset:
 
 msg_loading: db "Loading...",ENDL,0
 msg_error_failed_to_read: db "Failed to read disk",ENDL,0
-msg_error_kernal_not_found: db "KERNAL.BIN file not found",ENDL,0
-file_kernal_bin: db "KERNAL  BIN"
-kernal_cluster: dw 0
+msg_error_kernel_not_found: db "STAGE2.BIN file not found",ENDL,0
+file_kernel_bin: db "STAGE2  BIN"
+kernel_cluster: dw 0
 
 test: db 11h, 22h,33h
 
-KERNAL_LOAD_SEGMENT: equ 0x2000
-KERNAL_LOAD_OFFSET: equ 0
+KERNEL_LOAD_SEGMENT: equ 0x2000
+KERNEL_LOAD_OFFSET: equ 0
 
 times 510-($-$$) db 0
 dw 0xAA55
