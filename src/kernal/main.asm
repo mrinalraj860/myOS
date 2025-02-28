@@ -46,4 +46,4 @@ puts:
 
 
 
-msg_hello: db "Hello, World!",ENDL,0
+msg_hello: db "Hello, World from Kernal!",ENDL,0

@@ -365,6 +365,8 @@ msg_error_kernal_not_found: db "KERNAL.BIN file not found",ENDL,0
 file_kernal_bin: db "KERNAL  BIN"
 kernal_cluster: dw 0
 
+test: db 11h, 22h,33h
+
 KERNAL_LOAD_SEGMENT: equ 0x2000
 KERNAL_LOAD_OFFSET: equ 0
 
